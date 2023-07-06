@@ -285,5 +285,106 @@ plt.show()
 그래프 그림
 
 ### **결론**
-![Alt text](image.png)
+![image](https://github.com/doeunjua/inverted_pendulum/assets/122878319/8c729ee1-bbfd-43c4-95e5-3583c6e0db3a)
 
+
+### **전체코드**
+```python
+import gymnasium as gym
+import numpy as np
+import random
+from collections import deque 
+from keras.layers import Dense
+from tensorflow import keras
+from keras import Model
+import tensorflow as tf
+import matplotlib.pyplot as plt
+
+#inverted pendulum
+env = gym.make('Pendulum-v1',g=1)
+
+#action space
+action_space = np.linspace(-2,2,41) # -2~2 : 41개의 action space
+
+#인공신경망 만들기
+# 뉴럴 네트워크 모델 만들기
+class DQN(Model):
+    def __init__(self):
+        super(DQN, self).__init__()
+        self.d1 = Dense(512, input_dim=3, activation='tanh') #input_dim=3 : state의 차원(x,y,angular velocity)
+        self.d2 = Dense(256, activation='tanh')
+        self.d3 = Dense(128, activation='tanh')
+        self.d4 = Dense(len(action_space), activation='linear') #continuous한 action을 출력으로 가짐
+        self.optimizer = keras.optimizers.Adam(0.001)
+
+
+    def call(self, x):
+        x = self.d1(x)
+        x = self.d2(x)
+        x = self.d3(x)
+        x = self.d4(x)
+        return x
+
+model = DQN()
+
+D = deque(maxlen=8000)
+step = env.spec.max_episode_steps
+studyrate = 0.9
+batch_size = 32
+episode = 500
+eps = 0.9
+eps_decay = 0.99
+rewards_list = []
+
+#simulation
+for i in range(episode):
+    state = env.reset()[0]
+    state = state.reshape(1,3)
+    eps = max(0.01, eps * eps_decay)
+    total_reward = 0
+
+    for j in range(step):
+        if np.random.rand() <= eps:
+            action = np.random.choice(action_space)
+        else:
+            action= action_space[np.argmax(model.call(state))]
+            
+        next_state, reward = env.step((action,))[0:2]
+        
+        
+        next_state = next_state.reshape(1,3)
+        D.append((state, action, reward, next_state))#(1x3),(1),(1),(1x3)
+
+        state = next_state
+        total_reward += reward
+    
+    
+    avg_reward = total_reward / step
+    rewards_list.append(avg_reward)
+
+    #DQN 학습
+    if i > 40 :
+        mini_batch = random.sample(D, batch_size)
+        states = np.array([sample[0][0] for sample in mini_batch])
+        actions = np.array([sample[1] for sample in mini_batch])
+        rewards = np.array([sample[2] for sample in mini_batch])
+        next_states = np.array([sample[3][0] for sample in mini_batch])
+
+        actions_to_index = np.array([np.where(action_space == action)[0][0] for action in actions])
+
+        target_y = model.call(states).numpy()
+        target_y[range(batch_size), actions_to_index] = rewards + studyrate * np.max(model.call(next_states).numpy(), axis=1)
+
+        with tf.GradientTape() as tape:
+            predicted_values = model(states)
+            loss = tf.reduce_mean(tf.square(target_y - predicted_values))
+        gradients = tape.gradient(loss, model.trainable_variables)
+        model.optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+    
+    print('Episode: {}, Average Reward: {:.3f}, Epsilon: {:.2f}'.format(i, avg_reward, eps))
+
+plt.plot(rewards_list)
+plt.xlabel('Episode')
+plt.ylabel('Average Reward')
+plt.show()
+```
